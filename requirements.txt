@@ -1,0 +1,5 @@
+autopep8==1.5
+pycodestyle==2.5.0
+pymodbus==2.3.0
+pyserial==3.4
+six==1.14.0
