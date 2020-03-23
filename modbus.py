@@ -6,17 +6,32 @@ import time
 from threading import Thread, Lock
 
 from Register import Value, Register, U32, U64, STR32, S32, S16, U16
+from logger import ResultLogger, KeyValueLogger
+
+from gui import GUI
 
 
 class Modbus:
-    def __init__(self, ip, port, unit):
+    def __init__(self, args, **kwargs):
         self.thread = Thread(target=self._polling_thread)
         self.register_lock = Lock()
         self.registers: [int] = []
         self.available_registers: Dict[int, Register] = {}
-        self.unit = unit
-        self.client = ModbusTcpClient(ip, port=port, timeout=10)
+        self.unit = args.unit
+        self.client = ModbusTcpClient(args.address, port=args.port, timeout=10)
         self.polling_groups = []
+        self.daemon = args.daemon
+        self.interval = args.interval
+
+        if args.enablegui:
+            self.gui = GUI()
+        else:
+            self.gui = None
+
+        if args.verbose:
+            self.logger = KeyValueLogger()
+        else:
+            self.logger = None
 
     def __del__(self):
         self.client.close()
@@ -30,27 +45,33 @@ class Modbus:
                 print(f"Register with the id {register_id} does not exist")
             else:
                 register = self.available_registers[register_id]
-                print(f"{register} added")
                 self.registers.append(register_id)
 
     def add_register(self, register: Register):
         self.available_registers[register.id] = register
 
-    def start(self, args):
+    def start(self):
         self._group_register()
-        self.interval = args.interval
 
         self.connect()
 
-        if args.daemon:
+        if self.daemon:
             self.thread.daemon = True
             self.thread.start()
-            while True:
-                time.sleep(10)
+            if self.gui:
+                self.gui.run()
+            else:
+                while True:
+                    time.sleep(self.interval)
         else:
-            self._poll()
+            return self._poll()
+
+    def list_available_registers(self):
+        for index, register in self.available_registers.items():
+            print(register)
 
     def _poll(self):
+        result = {}
         for group in self.polling_groups:
             start_id = group[0].id
             length = self._length_of_group(group)
@@ -78,7 +99,13 @@ class Modbus:
                     if register.is_null():
                         value = "NAN"
 
-                    print(f"{register} => {value}")
+                    result[register] = value
+        if self.gui:
+            self.gui.update(result)
+        else:
+            if self.logger:
+                self.logger.log(result)
+        return result
 
     def _length_of_group(self, group):
         return sum(reg.length for reg in group)
